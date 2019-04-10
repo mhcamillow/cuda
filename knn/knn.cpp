@@ -7,72 +7,79 @@
 #include <sstream>
 #include <chrono> 
 #include <cstdlib>
-#include "util.h"
+#include "util.hpp"
+#include "distances.hpp"
+#include "fileUtils.hpp"
 
 using namespace std::chrono; 
 using namespace std;
 
-int getNumberOfElements(char *filepath) {
-    ifstream inFile(filepath); 
-    return count(istreambuf_iterator<char>(inFile), istreambuf_iterator<char>(), '\n');
+int train_samples_count, test_samples_count, train_feature_count, test_feature_count, k;
+char * train, * test;
+
+void initialize() {
+    train_samples_count = FileUtils::getNumberOfElements(train);
+    cout << "Train elements: " << train_samples_count << "\n";
+    train_feature_count = FileUtils::getNumberOfFeatures(train);
+    cout << "Train features: " << train_feature_count << "\n";
+    test_feature_count = FileUtils::getNumberOfFeatures(test);
+    cout << "Test features: " << test_feature_count << "\n";
+
+    cout << "K-Value: " << k << "\n";
+
+    test_samples_count = FileUtils::getNumberOfElements(test);
 }
 
-int getNumberOfFeatures(char *filepath) {
-    ifstream inFile(filepath);
-    string line;
-
-    if (inFile.is_open())
-    {
-        getline (inFile, line);
-        inFile.close();
+void checkClosest(double distance, double ** closest_distances, int ** closest_ids, int element, int train_idx) {
+    if (distance < closest_distances[element][0]) {
+        closest_distances[element][2] = closest_distances[element][1];
+        closest_distances[element][1] = closest_distances[element][0];
+        closest_distances[element][0] = distance;
+        closest_ids[element][2] = closest_ids[element][1];
+        closest_ids[element][1] = closest_ids[element][0];
+        closest_ids[element][0] = train_idx;
+    } else if (distance < closest_distances[element][1]) {
+        closest_distances[element][2] = closest_distances[element][1];
+        closest_distances[element][1] = distance;
+        closest_ids[element][2] = closest_ids[element][1];
+        closest_ids[element][1] = train_idx;
+    } else if (distance < closest_distances[element][2]) {
+        closest_distances[element][2] = distance;
+        closest_ids[element][2] = train_idx;
     }
-    
-    return count(line.begin(), line.end(), ' ') - 1;
 }
 
-void loadFeatures(string line, double * features) {
-    string delimiter = ":";
-    size_t pos = 0;
-    int index = 0;
-
-    string token;
-    while ((pos = line.find(delimiter)) != std::string::npos) {
-        line.erase(0, pos + 1);
-        // cout << line << endl;
-        pos = line.find(" ");
-        token = line.substr(0, pos);
-        stringstream(token) >> features[index];
-        index = index + 1;
-        line.erase(0, pos + delimiter.length());
-    }
-}
-
-void loadFile(char *filepath, int count, int * labels, double ** features) {
-    string line;
-    ifstream inputFile (filepath);
-    int index = 0;
-
-    if (inputFile.is_open())
-    {
-        while ( getline (inputFile, line) )
-        {
-            labels[index] = line[0] - 48;
-            line.erase(0, 2);
-            loadFeatures(line, features[index]);
-            index = index + 1;
+int guess(int ** closest_ids, int * train_labels, int element_idx) {
+    int n_count = 0;
+    int p_count = 0;
+    for (int j = 0; j < 3; j++) {
+        int id = closest_ids[element_idx][j];
+        if (train_labels[id] == 0) {
+            n_count = n_count + 1;
+        } else {
+            p_count = p_count + 1;
         }
-        inputFile.close();
     }
+
+    if (p_count > n_count)
+        return 1;
+
+    return 0;
 }
 
-double getEuclideanDistance(double arr1[], double arr2[], int features)
-{
-    double sum = 0;
-    for (int i = 0; i < features; i++) {
-        sum = sum + pow(arr1[i] - arr2[i], 2);
-    }
+void fit(double ** closest_distances, int ** closest_ids, double ** test_features, double ** train_features, int * train_labels, int * test_guesses) {
+    for (int i = 0; i < test_samples_count; i++) {
+        closest_distances[i][0] = 1000;
+        closest_distances[i][1] = 1000;
+        closest_distances[i][2] = 1000;
 
-	return sqrt(sum);
+        for (int j = 0; j < train_samples_count; j++) {
+            double distance = Distances::getEuclideanDistance(test_features[i], train_features[j], train_feature_count);
+            checkClosest(distance, closest_distances, closest_ids, i, j);
+        }
+
+        test_guesses[i] = guess(closest_ids, train_labels, i);
+    }
 }
 
 int main(int argc, char *argv[])
@@ -82,96 +89,39 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    char *train = argv[1];
-    char *test = argv[2];
-    int k = atoi(argv[3]);
+    train = argv[1];
+    test = argv[2];
+    k = atoi(argv[3]);
 
-    int train_samples_count = getNumberOfElements(train);
-    cout << "Train elements: " << train_samples_count << "\n";
-    int train_feature_count = getNumberOfFeatures(train);
-    cout << "Train features: " << train_feature_count << "\n";
-    int test_feature_count = getNumberOfFeatures(test);
-    cout << "Test features: " << test_feature_count << "\n";
-
-    cout << "K-Value: " << k << "\n";
+    initialize();
 
     if (train_feature_count != test_feature_count) {
         cout << "train_feature_count != test_feature_count" << "\n";
         return -1;
     }
-    
+
     int train_labels[train_samples_count];
-    double ** train_features = util::initializeArray(train_samples_count, train_feature_count);
+    double ** train_features = util::initializeArrayDouble(train_samples_count, train_feature_count);
     cout << "Loading train file" << "\n";
-    loadFile(train, train_samples_count, train_labels, train_features);
+    FileUtils::loadFile(train, train_samples_count, train_labels, train_features);
 
-
-    int test_samples_count = getNumberOfElements(test);
     int test_labels[test_samples_count];
     int test_guesses[test_samples_count];
-    double ** test_features = util::initializeArray(test_samples_count, train_feature_count);
+    double ** test_features = util::initializeArrayDouble(test_samples_count, train_feature_count);
     cout << "Loading test file" << "\n";
-    loadFile(test, test_samples_count, test_labels, test_features);
+    FileUtils::loadFile(test, test_samples_count, test_labels, test_features);
 
-    auto start = high_resolution_clock::now();
-    long long time_distance = 0, time_moving = 0;
-    int closest_ids[test_samples_count][k];
-    double closest_distances[test_samples_count][k];
-    for (int i = 0; i < test_samples_count; i++) {
-        closest_distances[i][0] = 1000;
-        closest_distances[i][1] = 1000;
-        closest_distances[i][2] = 1000;
+    int ** closest_ids = util::initializeArrayInt(test_samples_count, k);
+    double ** closest_distances = util::initializeArrayDouble(test_samples_count, k);
 
-        for (int j = 0; j < train_samples_count; j++) {
-            auto d_start = std::chrono::high_resolution_clock::now();
-            double distance = getEuclideanDistance(test_features[i], train_features[j], train_feature_count);
-            auto d_total = std::chrono::high_resolution_clock::now() - d_start;
-            time_distance = time_distance + std::chrono::duration_cast<std::chrono::microseconds>(d_total).count();
-
-            auto m_start = std::chrono::high_resolution_clock::now();
-            if (distance < closest_distances[i][0]) {
-                closest_distances[i][2] = closest_distances[i][1];
-                closest_distances[i][1] = closest_distances[i][0];
-                closest_distances[i][0] = distance;
-                closest_ids[i][2] = closest_ids[i][1];
-                closest_ids[i][1] = closest_ids[i][0];
-                closest_ids[i][0] = j;
-            } else if (distance < closest_distances[i][1]) {
-                closest_distances[i][2] = closest_distances[i][1];
-                closest_distances[i][1] = distance;
-                closest_ids[i][2] = closest_ids[i][1];
-                closest_ids[i][1] = j;
-            } else if (distance < closest_distances[i][2]) {
-                closest_distances[i][2] = distance;
-                closest_ids[i][2] = j;
-            }
-            auto m_total = std::chrono::high_resolution_clock::now() - m_start;
-            time_moving = time_moving + std::chrono::duration_cast<std::chrono::microseconds>(m_total).count();
-        }
-
-        int n_count = 0;
-        int p_count = 0;
-        for (int j = 0; j < 3; j++) {
-            int id = closest_ids[i][j];
-            if (train_labels[id] == 0) {
-                n_count = n_count + 1;
-            } else {
-                p_count = p_count + 1;
-            }
-        }
-
-        if (p_count > n_count) {
-            test_guesses[i] = 1;
-        } else {
-            test_guesses[i] = 0;
-        }
-    }
-
+    auto start = std::chrono::high_resolution_clock::now();
+    fit(closest_distances, closest_ids, test_features, train_features, train_labels, test_guesses);
     auto stop = high_resolution_clock::now();
     auto duration = duration_cast<microseconds>(stop - start);
     cout << "Total time: " << duration.count() / 1000 << "ms" <<  endl;
-    cout << "Time - Distance: " << time_distance / 1000 << "ms" <<  endl;
-    cout << "Time - Moving: " << time_moving / 1000 << "ms" <<  endl;
+
+    // cout << "Time - Distance: " << time_distance / 1000 << "ms" <<  endl;
+    // cout << "Time - Moving: " << time_moving / 1000 << "ms" <<  endl;
 
     int tp = 0, fp = 0, tn = 0, fn = 0;
     for (int i = 0; i < test_samples_count; i++) {
@@ -196,3 +146,10 @@ int main(int argc, char *argv[])
    
 	return 0;
 }
+
+
+
+// auto d_start = std::chrono::high_resolution_clock::now();
+// double distance = Distances::getEuclideanDistance(test_features[i], train_features[j], train_feature_count);
+// auto d_total = std::chrono::high_resolution_clock::now() - d_start;
+// time_distance = time_distance + std::chrono::duration_cast<std::chrono::microseconds>(d_total).count();
