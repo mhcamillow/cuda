@@ -57,6 +57,10 @@ int main(int argc, char *argv[])
     FileUtils::loadFile(train, train_size, train_labels, train_features, feature_count);
     FileUtils::loadFile(test, test_size, test_labels, test_features, feature_count);
 
+    for (int i = 0; i < test_size; i++) {
+        cout << "asdasdasdasd " << test_labels[i] <<  endl;
+    }
+
     auto start = std::chrono::high_resolution_clock::now();
     knn.train(train_features, train_labels);
     knn.guess(closest_distances, closest_ids, test_features, test_guesses);
@@ -64,7 +68,10 @@ int main(int argc, char *argv[])
     auto stop = high_resolution_clock::now();
     auto duration = duration_cast<microseconds>(stop - start);
     cout << "Total time: " << duration.count() / 1000 << "ms" <<  endl;
-    cout << "Score: " << knn.score(test_labels, test_guesses)  << endl;
+    // cout << "Score: " << knn.score(test_labels, test_guesses)  << endl;
+    for (int i = 0; i < test_size; i++) {
+        cout << "123 " << test_labels[i] <<  endl;
+    }
     knn.printConfusionMatrix();
 
     freeMemory();

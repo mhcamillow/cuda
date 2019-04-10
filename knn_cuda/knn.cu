@@ -108,7 +108,9 @@ class KNN {
         }
 
         double score(int * test_labels, int * test_guesses) {
+            cout << "size: " << test_size << endl;
             for (int i = 0; i < test_size; i++) {
+                cout << "idx: " << i << endl;
                 if (test_labels[i] == test_guesses[i]) {
                     if (test_labels[i] == 0) {
                         tn++;
