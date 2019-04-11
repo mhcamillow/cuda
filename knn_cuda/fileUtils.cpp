@@ -30,7 +30,7 @@ int FileUtils::getNumberOfFeatures(char *filepath) {
     return count(line.begin(), line.end(), ' ') - 1;
 }
 
-void FileUtils::loadFeatures(string line, double * features) {
+void FileUtils::parseFeatures(string line, double * features) {
     string delimiter = ":";
     size_t pos = 0;
     int index = 0;
@@ -57,9 +57,43 @@ void FileUtils::loadFile(char *filepath, int count, int * labels, double * featu
         {
             labels[index] = line[0] - 48;
             line.erase(0, 2);
-            loadFeatures(line, &features[index * feature_count]);
+            parseFeatures(line, &features[index * feature_count]);
             index = index + 1;
         }
+        inputFile.close();
+    }
+}
+
+void FileUtils::loadFeatures(char *filepath, double * features, int feature_count) {
+    string line;
+    ifstream inputFile (filepath);
+    int index = 0;
+
+    if (inputFile.is_open())
+    {
+        while ( getline (inputFile, line) )
+        {
+            line.erase(0, 2);
+            parseFeatures(line, &features[index * feature_count]);
+            index = index + 1;
+        }
+        inputFile.close();
+    }
+}
+
+void FileUtils::loadLabels(char *filepath, int * labels) {
+    string line;
+    ifstream inputFile (filepath);
+    int index = 0;
+
+    if (inputFile.is_open())
+    {
+        while ( getline (inputFile, line) )
+        {
+            labels[index] = line[0] - 48;
+            index++;
+        }
+
         inputFile.close();
     }
 }
