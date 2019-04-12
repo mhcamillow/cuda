@@ -1,83 +1,37 @@
-#include "distances.cu"
 #include <iostream>
 
 using namespace std;
 
-__device__
-void checkClosest(
-    double * distances,
-    int * ids,
-    int pos,
-    int k,
-    double distance,
-    int trainIdx
-) 
-{
-    for (int i = 0; i < k; i++) {
-        if (distance < distances[pos + i]) {
-            for (int x = k - 1; x > i; x--) {
-                distances[pos + x] = distances[pos + x - 1];
-                ids[pos + x] = ids[pos + x - 1];
-            }
-            distances[pos + i] = distance;
-            ids[pos + i] = trainIdx;
-            return;
-        }
-    }
-}
-
-__device__
-int check(int * closest_ids, int * train_labels, int i, int k) {
-    int n_count = 0;
-    int p_count = 0;
-    // for (int j = 0; j < k; j++) {
-    //     int id = closest_ids[i * k + j];
-    //     if (train_labels[id] == 0) {
-    //         n_count = n_count + 1;
-    //     } else {
-    //         p_count = p_count + 1;
-    //     }
-    // }
-
-    if (p_count > n_count)
-        return 1;
-
-    return 0;
-}
-
-__global__
 void cuda_guess(
-    double * test_features,
-    double * train_features,
+    float * test_features,
+    float * train_features,
     int * test_guesses, 
     int * train_labels,
-    double * distances,
-    int * ids,
+    int * temp_irmao,
     int test_size, 
     int train_size, 
-    int test_feature_count, 
+    int feature_count, 
     int k) 
 {
-    for (int i = 0; i < test_size; i++) {
-        int curr_pos = i * train_size;
-        for (int x = 0; x < k; x++) {
-            distances[curr_pos * x] = 1000;
-            ids[curr_pos * x] = 0;
+    for (int testIdx = 0; testIdx < test_size; testIdx++) {
+        float smallest_distance = 10.0f;
+        int smallest_distance_id = 0;
+
+        for (int trainIdx = 0; trainIdx < train_size; trainIdx++) {
+            
+            float distance = 0.0f;
+            for (int featureIdx = 0; featureIdx < feature_count; featureIdx++) {
+                distance = distance + powf(test_features[testIdx * feature_count + featureIdx] - train_features[trainIdx * feature_count + featureIdx], 2);
+            }
+
+            distance = sqrtf(distance);
+            if (distance < smallest_distance) {
+                smallest_distance = distance;
+                smallest_distance_id = trainIdx;
+            }
         }
 
-        for (int j = 0; j < train_size; j++) {
-            double distance = getEuclideanDistance(test_features, train_features, i, j, test_feature_count);
-            checkClosest(distances, ids, curr_pos, k, distance, j);
-        }
-
-        test_guesses[i] = 1;//check(ids, train_labels, i, k);
-    }
-}
-
-__global__
-void cuda_test(int * train_labels, int size) {
-    for (int i = 0; i < size; i++) {
-        train_labels[i] = i;
+        test_guesses[testIdx] = train_labels[smallest_distance_id];
     }
 }
 
@@ -93,34 +47,23 @@ class KNN {
             k = k_p;
         }
 
-        void guess(double * train_features, int * train_labels, double * test_features, int * test_guesses) {
-            double * distances;
-            int * ids;
-            cudaMallocManaged(&distances, test_size * k * sizeof(double));
-            cudaMallocManaged(&ids, test_size * k * sizeof(int));
-
-            cuda_guess<<<1, 1>>>(
+        void guess(float * train_features, int * train_labels, float * test_features, int * test_guesses) {
+            cuda_guess(
                 test_features,
                 train_features,
                 test_guesses, 
                 train_labels,
-                distances,
-                ids,
+                temp_irmao,
                 test_size, 
                 train_size, 
                 test_feature_count, 
                 k
             );
-            cudaDeviceSynchronize();
-            cudaFree(distances);
-        }
 
-        void test(int * train_labels, int size) {
-            cuda_test<<<1, 1>>>(train_labels, size);
             cudaDeviceSynchronize();
         }
 
-        double score(int * test_labels, int * test_guesses) {
+        float score(int * test_labels, int * test_guesses) {
             for (int i = 0; i < test_size; i++) {
                 if (test_labels[i] == test_guesses[i]) {
                     if (test_labels[i] == 0) {
@@ -137,7 +80,7 @@ class KNN {
                 }
             }
 
-            return (double)(tp + tn) / (test_size);
+            return (float)(tp + tn) / (test_size);
         }
 
         void printConfusionMatrix() {

@@ -75,7 +75,7 @@ int main(int argc, char *argv[]) {
 
     // cudaFree(train_labels);
     int test_size = 3;
-    int k = 3;
+    int k = 4;
     double * distances;
     int * ids;
     cudaMallocManaged(&distances, test_size * k * sizeof(double));

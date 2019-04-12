@@ -5,6 +5,5 @@ fileUtils.o: fileUtils.cpp
 main.o: main.cu
 	nvcc bin/fileUtils.o main.cu -o bin/main
 	sudo chmod +x bin/main
-	./bin/main train-m.txt test-m.txt 3
 clean:
 	rm -rf bin/*
