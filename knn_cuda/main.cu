@@ -17,6 +17,22 @@ char * filepath_train, * filepath_test;
 int train_size, test_size, feature_count, k, * train_labels, * test_labels, * test_guesses;
 float * train_features, * test_features;
 
+int countClasses(int * labels, int train_size) { 
+    sort(labels, labels + train_size); 
+    int counter = 0;
+
+    for (int i = 0; i < train_size; i++) 
+    { 
+        // Move the index ahead while there are duplicates 
+        while (i < train_size-1 && labels[i] == labels[i+1]) 
+            i++; 
+  
+        counter++;
+    }
+
+    return counter;
+}
+
 int main(int argc, char *argv[])
 {
     cout << "=================== KNN K-BULOZO ========================" << endl;
@@ -45,10 +61,21 @@ int main(int argc, char *argv[])
     cudaMallocManaged(&test_guesses, test_size * sizeof(int));
     cudaMallocManaged(&test_features, test_size * feature_count * sizeof(float));
 
-    KNN knn(train_size, test_size, feature_count, k);
+    
 
     FileUtils::loadFeatures(filepath_train, train_features, feature_count);
     FileUtils::loadLabels(filepath_train, train_labels);
+
+    int * train_labels_copy;
+    cudaMallocManaged(&train_labels_copy, train_size * sizeof(int));
+    copy(train_labels, train_labels + train_size, train_labels_copy);
+
+    int classes = countClasses(train_labels, train_size);
+    cout << "Number of classes: " << classes << endl;
+
+    cudaFree(train_labels_copy);
+
+    KNN knn(train_size, test_size, feature_count, k, classes);
 
     auto start = std::chrono::high_resolution_clock::now();
     FileUtils::loadFeatures(filepath_test, test_features, feature_count);

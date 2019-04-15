@@ -23,49 +23,38 @@ void checkClosest(
     }
 }
 
-int guessClosest(int * train_labels,  int * ids, int k) {
-    int np = 0, nf = 0;
+int guessClosest(int * train_labels,  float * distances, int * ids, int k, int classes) {
+    int * guesses;
+    int * guessDistances;
+    cudaMallocManaged(&guesses, classes * sizeof(int));
+    cudaMallocManaged(&guessDistances, classes * sizeof(float));
+
+    for (int i = 0; i < classes; i++) {
+        guesses[i] = 0;
+        guessDistances[i] = 0;
+    }
+    
     for (int i = 0; i < k; i++) {
-        int idx = ids[i];
-        if (train_labels[idx] == 0) {
-            nf++;
-        } else {
-            np++;
+        int closestID = ids[i];
+        int closestIDsLabel = train_labels[closestID];
+        guesses[closestIDsLabel] = guesses[closestIDsLabel] + 1;
+        guessDistances[closestIDsLabel] = guessDistances[closestIDsLabel] + distances[i];
+    }
+
+    int biggestCount = 0, biggestClass = -1, biggestClassDistance = 0;;
+    for (int i = 0; i < classes; i++) {
+        if ((guesses[i] > biggestCount) || (guesses[i] == biggestCount && guessDistances[i] < biggestClassDistance)) {
+            biggestCount = guesses[i];
+            biggestClass = i;
+            biggestClassDistance = guessDistances[i];
         }
     }
-    if (np > nf)
-        return 1;
-    return 0;
+
+    cout << endl;
+    cudaFree(guesses);
+    cudaFree(guessDistances);
+    return biggestClass;
 }
-
-// void cuda_guess(
-//     float * test_features,
-//     float * train_features,
-//     int * test_guesses, 
-//     int * train_labels,
-//     float * distances,
-//     int * ids,
-//     int test_size, 
-//     int train_size, 
-//     int feature_count, 
-//     int k) 
-// {
-//     for (int testIdx = 0; testIdx < test_size; testIdx++) {
-//         int curr_pos = testIdx * k;
-//         for (int trainIdx = 0; trainIdx < train_size; trainIdx++) {
-            
-//             float distance = 0.0f;
-//             for (int featureIdx = 0; featureIdx < feature_count; featureIdx++) {
-//                 distance = distance + powf(test_features[testIdx * feature_count + featureIdx] - train_features[trainIdx * feature_count + featureIdx], 2);
-//             }
-//             distance = sqrtf(distance);
-
-//             checkClosest(distances, ids, curr_pos, k, distance, trainIdx);
-//         }
-
-//         test_guesses[testIdx] = guessClosest(train_labels, ids, curr_pos, k);
-//     }
-// }
 
 __global__
 void calculateDistances(float * test_features, float * train_features, float * distances, int feature_count, int train_size) {
@@ -84,14 +73,15 @@ void calculateDistances(float * test_features, float * train_features, float * d
 
 class KNN {
     public:
-        int train_size, test_size, train_feature_count, test_feature_count, k;
-        int tp = 0, fp = 0, tn = 0, fn = 0;
-        KNN (int train_size_p, int test_size_p, int feature_count_p, int k_p) {
+        int train_size, test_size, train_feature_count, test_feature_count, k, classes;
+        int * confusionMatrix;
+        KNN (int train_size_p, int test_size_p, int feature_count_p, int k_p, int classes_p) {
             train_size = train_size_p;
             test_size = test_size_p;
             train_feature_count = feature_count_p;
             test_feature_count = feature_count_p;
             k = k_p;
+            classes = classes_p;
         }
 
         void guess(float * train_features, int * train_labels, float * test_features, int * test_guesses) {
@@ -102,17 +92,10 @@ class KNN {
             cudaMallocManaged(&kClosestDistances, k * sizeof(float));
             cudaMallocManaged(&kClosestIds, k * sizeof(int));
 
-            // for (int i = 0; i < test_size; i++) {
-            //     distances[i] = 0.12345;
-            // }
-
             int blockSize = 256;
             int numBlocks = (train_size + blockSize - 1) / blockSize;
-            // <<<numBlocks, blockSize>>>
 
             for (int i = 0; i < test_size; i++) {
-            // for (int i = 0; i < 50; i++) {
-                // cout << "Runnning test " << i << endl;
                 calculateDistances<<<numBlocks, blockSize>>>(
                     &test_features[i * train_feature_count], 
                     train_features, 
@@ -121,26 +104,22 @@ class KNN {
                     train_size);
                 cudaDeviceSynchronize();
 
-                // for (int j = 0; j < train_size; j++) { 
-                //     cout << "Id: " << j << ": " << distances[j] << endl;
-                // }
-
                 for (int j = 0; j < k; j++) {
-                    kClosestDistances[j] = 100;
+                    kClosestDistances[j] = 1000;
                     kClosestIds[j] = -1;
                 }
 
                 for (int j = 0; j < train_size; j++) { 
+                    // cout << "Distancia entre " << i << " e " << j << ": " << distances[j] << endl;
                     checkClosest(kClosestDistances, kClosestIds, k, distances[j], j);
                 }
 
-                // cout << "For test " << i << ", closest ids: " << endl;
-                // for ( int a = 0; a < k; a++) {
-                //     cout << "Id: " << kClosestIds[a] << ": " << kClosestDistances[a] << " - ";
-                // }
-                // cout << endl;
+                for (int j = 0; j < k; j++) {
+                    cout << "closests: " << kClosestIds[j] << ", ";
+                }
+                cout << endl;
 
-                test_guesses[i] = guessClosest(train_labels, kClosestIds, k);
+                test_guesses[i] = guessClosest(train_labels, kClosestDistances, kClosestIds, k, classes);
             }
 
             cudaFree(distances);
@@ -149,27 +128,35 @@ class KNN {
         }
 
         float score(int * test_labels, int * test_guesses) {
+            cudaMallocManaged(&confusionMatrix, classes * classes * sizeof(int));
+            int correctGuesses = 0;
+
+            for (int i = 0; i < classes * classes; i++) { 
+                confusionMatrix[i] = 0;
+            }
+
             for (int i = 0; i < test_size; i++) {
-                if (test_labels[i] == test_guesses[i]) {
-                    if (test_labels[i] == 0) {
-                        tn++;
-                    } else {
-                        tp++;
-                    }
-                } else { 
-                    if (test_labels[i] == 0) {
-                        fp++;
-                    } else {
-                        fn++;
-                    }
+                int guess = test_guesses[i];
+                int actual = test_labels[i];
+
+                // cout << "Sample " << i << " - " << guess << " - " << actual << endl;
+
+                confusionMatrix[actual * classes + guess]++;
+                if (guess == actual) { 
+                    correctGuesses++;
                 }
             }
 
-            return (float)(tp + tn) / (test_size);
+            return (float)(correctGuesses) / (test_size);
         }
 
         void printConfusionMatrix() {
-            cout << tn << "\t" << fp << endl;
-            cout << fn << "\t" << tp << endl;
+            for (int i = 0; i < classes * classes; i++) { 
+                cout << confusionMatrix[i] << "\t";
+
+                if ((i + 1) % (classes) == 0) {
+                    cout << endl;
+                }
+            }
         }
 };
